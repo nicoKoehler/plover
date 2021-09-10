@@ -16,6 +16,7 @@ from plotly.subplots import make_subplots
 from finta import TA as ta
 import threading as th
 import sys
+import secrets
 
 # ++++++++++++++++++++++ SETUP ++++++++++++++++++++++
 tz_local = pytz.timezone("Europe/Zurich")
@@ -69,6 +70,70 @@ bsm.start()
 df_d10 = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
 df_data = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
 df_d_csv = df_d10   # csv write df
+
+
+# ++++++++++++++++++++++ TRADING SETUP ++++++++++++++++++++++
+df_book = pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status"])
+funds = 100
+openTrade_ema = 0
+openTrade_macd = 0
+openTrade_so = 0
+trade_id_so = ""
+trade_id_macd = ""
+trade_id_ema = ""
+
+
+def udf_trade(openTrade, ttype, price, tradeid = ""):
+    global funds
+    global openTrade_so
+
+    if ttype == 1:
+        if funds == 0:
+            print("ERROR: Not sufficient funds")
+            return 0
+        
+        if openTrade == 0 and ttype == 1:
+            print(" *************** BUY ***************")
+            tradeid = str(secrets.token_hex(5))
+
+            while tradeid in df_book.index:
+                tradeid = str(secrets.token_hex(5))
+
+        else: 
+            return print("invalid trade combination")
+
+        print(f"Trade ID found, starting Trade: {str(tradeid)}")
+
+        # assumes investment of full funds
+        df_book.loc[str(tradeid), ["tradeType", "buyPrice","qty", "buyTime", "status"]] = ["long",price, (funds/price), time.time(), "bought"]
+        print("Purchase Complete")
+        print(df_book)
+        funds = 0
+        openTrade_so = 1
+        return tradeid
+
+    if ttype == -1 and openTrade_so == 1:
+        print(f" *************** SELL: {tradeid} ***************")
+        fProfit = df_book.loc[str(tradeid)]["qty"] *  (price - df_book.loc[str(tradeid)]["buyPrice"])
+        fSalesDuration_s = time.time() - df_book.loc[str(tradeid)]["buyTime"]
+        fProfit_per_sec = fProfit / fSalesDuration_s
+        df_book.loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_per_second","status"]] = [price, time.time(), fProfit, fProfit_per_sec, "closed"]
+
+
+        print("Sell Completed")
+        print("---------------------------------------")
+        print(f"Bought { df_book.loc[str(tradeid)]['qty'] } \t @ { df_book.loc[str(tradeid)]['buyPrice']} USD")
+        print(f"Sold { df_book.loc[str(tradeid)]['qty'] } \t @ { price} USD")
+        print(f"==> Total Profit: {fProfit} in {fSalesDuration_s} seconds ||==> {(fProfit_per_sec):.3f} USD/sec")
+        print("---------------------------------------\n")
+
+        openTrade_so = 0
+        funds = min(100, (df_book.loc[str(tradeid)]["qty"] * df_book.loc[str(tradeid)]["sellPrice"]))
+        tradeid = ""
+        print(f"New Funds: {funds}\n")
+        return tradeid
+
+
 
 def bin_ws(msg):
     global df_data
@@ -133,7 +198,7 @@ t_a1 = time.time()
 
 reqObs = 20
 print("")
-for i in range(0,r_int*reqObs):
+while True:
 
     t_a2 = time.time()
     
@@ -173,15 +238,34 @@ for i in range(0,r_int*reqObs):
     dfa["so_20"] = 20
     dfa["so_80"] = 80
 
-        #... comp
+            #... comp
+
+
     so_comp_cond=[
-    ((dfa["k_line"].shift(1) < 20) & (dfa["k_line"] > dfa["d_line"]))
-    , ((dfa["k_line"].shift(1) > 80) & (dfa["k_line"] < 80))
+        ((dfa["k_line"].shift(1) < 20) & (dfa["k_line"] > dfa["d_line"]))
+        , ((dfa["k_line"].shift(1) > 80) & (dfa["k_line"] < 80))
+
     ]
 
     comp_choices =[1,-1]
-    
 
+    k_last = dfa["k_line"].tail(1).item()
+    d_last = dfa["d_line"].tail(1).item() 
+    
+    # support variables. Set and maintain as soon as condition detected. Reset on sell
+    tsv_so_k100 = 0
+    tsv_so_Dmax = 0
+    tsv_so_k100 = 1 if k_last >= 95 and tsv_so_k100 == 0 else 0      # trade support variable: kmax 
+    tsv_so_Dmax = 1 if k_last >= 95 and tsv_so_Dmax == 0 else 0      # trade support variable: Dmax 
+    tsv_so_KD = 0                                                    # trade support variable: K falls below D
+
+    # if k and d have maxed, and k starts to fall below d
+    if tsv_so_KD < 2 and (tsv_so_Dmax + tsv_so_k100) == 2 and k_last < d_last:
+        tsv_so_KD += 1
+    
+    dfa["tsv_so_k100"] = tsv_so_k100
+    dfa["so_tsv_k100"] = tsv_so_Dmax
+    dfa["tsv_so_KD"] = tsv_so_KD
 
     # ++++> MACD
     macd_fast = 26
@@ -210,12 +294,41 @@ for i in range(0,r_int*reqObs):
 
 
     #... OVERLL comp
-
     dfa["ema_switch"] = np.select(ema_comp_cond, ema_comp_choices, default=0)
     dfa["so_switch"] = np.select(so_comp_cond, comp_choices, default=0)
     dfa["macd_switch"] = np.select(macd_comp_cond, macd_comp_choices, default=0)
 
-    udf_progressBar(i+1,r_int*reqObs,reqObs, t_a1)
+
+    # ++++++++++++++++++++++ TRADING ++++++++++++++++++++++
+    if dfa["so_switch"].tail(1).item() == 1 and openTrade_so == 0:
+        print("\BUY signal found")
+        print(dfa.tail(1))
+
+        trade_id_so = udf_trade(openTrade_so, dfa["so_switch"].tail(1).item(), dfa["close"].tail(1).item(), trade_id_so)
+
+        print(f"[[ buy complete: {openTrade_so} > {trade_id_so}]]")
+        time.sleep(5)
+
+    elif dfa["so_switch"].tail(1).item() == 1 and openTrade_so == 1:
+        print("\nTrade already open...")
+    
+    elif  dfa["so_switch"].tail(1).item() == -1 and openTrade_so == 1:
+        print("\nSELL signal found!")
+        print(dfa.tail(1))
+        trade_id_so = udf_trade(openTrade_so, dfa["so_switch"].tail(1).item(), dfa["close"].tail(1).item(), trade_id_so)
+        print(f"[[ SELL complete: {openTrade_so} > {trade_id_so}]]")
+        break
+
+    # no need for other variables, as tsv_so_KD already includes conditions on k100 and Dmax
+    if tsv_so_KD == 2:
+        print("\nSELL signal: tsv_so_KD found!")
+        print(dfa.tail(1))
+        trade_id_so = udf_trade(openTrade_so, dfa["so_switch"].tail(1).item(), dfa["close"].tail(1).item(), trade_id_so)
+        print(f"[[ SELL complete: {openTrade_so} > {trade_id_so}]]")
+        break
+
+    
+    # udf_progressBar(i+1,r_int*reqObs,reqObs, t_a1)
     
     time.sleep(1)
 
@@ -239,5 +352,6 @@ df_d10[cols] = df_d10[cols].apply(pd.to_numeric, downcast="float",errors="coerce
 
 df_d_csv.to_csv("./binance_dfS.csv", index=True)
 df_d10.to_csv("./binance_df10.csv", index=True)
+df_book.to_csv("./df_books.csv", index=True)
 
 print("Le Fin")
