@@ -312,7 +312,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
             dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet)
 
-            print(f"[[ buy complete: {dWallet['openTrade']} > {dWallet['trade_id']}]]")
+            print(f"[[ buy complete: {dWallet}]]")
             time.sleep(5)
 
         elif dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 1:
@@ -321,7 +321,8 @@ def udf_tradeMASTER(vSymbol, vMethod):
         elif  dfa[f"{vMethod}_switch"].tail(1).item() == -1 and dWallet["openTrade"] == 1:
             print("\nSELL signal found!")
             dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet)
-            print(f"[[ SELL complete: {dWallet['openTrade']} > {dWallet['trade_id']}]]")
+            print(f"[[ SELL complete: {dWallet}]]")
+            print("+"*100)
 
         
         time.sleep(1)
