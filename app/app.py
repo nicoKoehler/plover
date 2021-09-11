@@ -30,10 +30,11 @@ client = Client(apiKey, apiKey_secret)
 cr_prices = {"error":False}
 
 r_int = 2   #resample intervall
-flag_start = 0
 flag_lookback = 0
 iLookBack = 20      # max period lookback
-
+dMaster = {}
+lSymbols = ["BTCUSDT"]
+lMethods = ["so"]
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
 
@@ -48,41 +49,8 @@ def udf_df_con(df, dtCol="timestamp"):
     cols = df.select_dtypes(exclude=["datetime64"]).columns
     df[cols] = df[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
 
-
-def udf_progressBar(step, total, steps, t0):
-    incr = int(total/steps)
-    prgr = (i-i%incr)/incr
-    rem = steps-prgr
-    print(f"Progress: {(i/total):.0%}  [{'█' * int(prgr)}{'-' * int(rem)}] @{(time.time() - t0):.1f}sec ", end="\r")
-
-# ++++++++++++++++++++++ REPEAT FUNCTION ++++++++++++++++++++++
-def udf_repeat():
-    t = th.Timer(5.0, udf_repeat)
-    t.daemon = True #exits timer when no non-daemon threads are alive anymore
-    t.start()
-    print(f"Min. Data Collection: {len(df_d10)} entries {(len(df_d10)/(iLookBack)):.0%} in {(time.time() - t0):.2f} seconds", end="\r")
-    
-
-# ++++++++++++++++++++++ WS ++++++++++++++++++++++
-bsm = tsm(api_key=apiKey, api_secret=apiKey_secret)
-bsm.start()
-
-df_d10 = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
-df_data = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
-df_d_csv = df_d10   # csv write df
-
-
-# ++++++++++++++++++++++ TRADING SETUP ++++++++++++++++++++++
-df_book = pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status"])
-
-trade_id_so = ""
-trade_id_macd = ""
-trade_id_ema = ""
-
-t0 = 0
-
 def udf_trade(ttype, price, wallet):
-    global funds
+    
     
 
     if ttype == 1:
@@ -94,7 +62,7 @@ def udf_trade(ttype, price, wallet):
             print(" *************** BUY ***************")
             wallet["trade_id"] = str(secrets.token_hex(5))
 
-            while wallet["trade_id"] in df_book.index:
+            while wallet["trade_id"] in wallet["book"].index:
                 wallet["trade_id"] = str(secrets.token_hex(5))
 
         else: 
@@ -103,9 +71,9 @@ def udf_trade(ttype, price, wallet):
         print(f"Trade ID found, starting Trade: {str(wallet['trade_id'])}")
 
         # assumes investment of full funds
-        df_book.loc[str(wallet["trade_id"]), ["tradeType", "buyPrice","qty", "buyTime", "status"]] = ["long",price, (wallet['funds']/price), time.time(), "bought"]
+        wallet["book"].loc[str(wallet["trade_id"]), ["tradeType", "buyPrice","qty", "buyTime", "status"]] = ["long",price, (wallet['funds']/price), time.time(), "bought"]
         print("Purchase Complete")
-        print(df_book)
+        print(wallet["book"])
         wallet["funds"] = 0
         wallet['openTrade'] = 1
         return wallet
@@ -114,77 +82,24 @@ def udf_trade(ttype, price, wallet):
         tradeid = wallet['trade_id']
 
         print(f" *************** SELL: {tradeid} ***************")
-        fProfit = df_book.loc[str(tradeid)]["qty"] *  (price - df_book.loc[str(tradeid)]["buyPrice"])
-        fSalesDuration_s = time.time() - df_book.loc[str(tradeid)]["buyTime"]
+        fProfit = wallet["book"].loc[str(tradeid)]["qty"] *  (price - wallet["book"].loc[str(tradeid)]["buyPrice"])
+        fSalesDuration_s = time.time() - wallet["book"].loc[str(tradeid)]["buyTime"]
         fProfit_per_sec = fProfit / fSalesDuration_s
-        df_book.loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_per_second","status"]] = [price, time.time(), fProfit, fProfit_per_sec, "closed"]
+        wallet["book"].loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_per_second","status"]] = [price, time.time(), fProfit, fProfit_per_sec, "closed"]
 
 
         print("Sell Completed")
         print("---------------------------------------")
-        print(f"Bought { df_book.loc[str(tradeid)]['qty'] } \t @ { df_book.loc[str(tradeid)]['buyPrice']} USD")
-        print(f"Sold { df_book.loc[str(tradeid)]['qty'] } \t @ { price} USD")
+        print(f"Bought { wallet['book'].loc[str(tradeid)]['qty'] } \t @ { wallet['book'].loc[str(tradeid)]['buyPrice']} USD")
+        print(f"Sold { wallet['book'].loc[str(tradeid)]['qty'] } \t @ { price} USD")
         print(f"==> Total Profit: {fProfit} in {fSalesDuration_s} seconds ||==> {(fProfit_per_sec):.3f} USD/sec")
         print("---------------------------------------\n")
 
         wallet["openTrade"] = 0
-        wallet["funds"] = min(100, (df_book.loc[str(tradeid)]["qty"] * df_book.loc[str(tradeid)]["sellPrice"]))
+        wallet["funds"] = min(100, (wallet["book"].loc[str(tradeid)]["qty"] * wallet["book"].loc[str(tradeid)]["sellPrice"]))
         wallet["trade_id"] = ""
         print(f"New Funds: {wallet['funds']}\n")
         return wallet
-
-
-
-def bin_ws(msg):
-    global df_data
-    global df_d10
-    global flag_start
-    global df_d_csv
-
-    lstTimeStamp = dt.datetime.fromtimestamp(msg["E"]/1000)
-    
-    # ensure that the first entry is a multiple of the interval, otherwise resampling becomes issue
-    if flag_start == 0 and lstTimeStamp.second % r_int != 0:
-        print(f"Not time yet: {lstTimeStamp} > {lstTimeStamp.second}")
-        return 0
-    elif flag_start == 0 and lstTimeStamp.second % r_int == 0:
-        print("Its time...")
-        flag_start = 1
-
-
-    l_ws = [msg["E"],msg["o"], msg["h"] , msg["l"], msg["c"], msg["b"], msg["a"]]
-    df_data.loc[len(df_data)] = l_ws
-
-    #print(f"Took me {(time.time()-t0):.2f} seconds to get here...")
-
-    # once enough data in DF, copy, delete and analyze
-    if len(df_data) == r_int:
-        df_d_copy = df_data.copy() # reset immediately to allow WS to continue writing in background
-        df_data = df_data.iloc[0:0]
-
-        udf_df_con(df_d_copy)
-        df_d_csv = pd.concat([df_d_csv,df_d_copy])
-
-        df_rs = df_d_copy.resample(f"{r_int}S", closed="left").mean()
-        #print(df_d_copy)
-        #print(df_d10)
-
-        df_d10 = pd.concat([df_d10, df_rs])
-        df_d_copy = df_d_copy.iloc[0:0]
-        df_rs = df_rs.iloc[0:0]
-
-
-    
-def udf_startWS(vSymbol):
-    global r_int
-    global t0
-    print(f"Starting....{dt.datetime.now()}")
-    t0 = time.time()
-
-    bsm.start_symbol_ticker_socket(callback=bin_ws, symbol=vSymbol)
-    print(f"WS Start Time: {(time.time()-t0)}")
-
-    time.sleep(r_int) # crude approach, wait max r_int to get WS going
 
 
 
@@ -197,16 +112,81 @@ def udf_tradeMASTER(vSymbol, vMethod):
     - vMethod       => method of comparison, [so, ema, macd, ...] 
     """
 
-    trade_id = ""
+    # PARAMETERS
+    t0 = 0
+    flag_start = 0
+
+    # DATAFRAMES
+    df_d10 = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
+    df_data = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
+    df_d_csv = df_d10   # csv write df
+    df_book = pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status"])
+
+
+    # DICTIONARIES
     dWallet = {
         "trade_id": ""
         , "openTrade": 0
         , "funds": 100
+        , "book": df_book
     }
 
+    dWebsockets =  {}
 
 
-    udf_startWS(vSymbol)
+
+
+    def bin_ws(msg):
+
+        nonlocal flag_start
+        nonlocal df_data
+        nonlocal df_d_csv
+        nonlocal df_d10
+
+        lstTimeStamp = dt.datetime.fromtimestamp(msg["E"]/1000)
+        
+        # ensure that the first entry is a multiple of the interval, otherwise resampling becomes issue
+        if flag_start == 0 and lstTimeStamp.second % r_int != 0:
+            print(f"Not time yet: {lstTimeStamp} > {lstTimeStamp.second}")
+            return 0
+        elif flag_start == 0 and lstTimeStamp.second % r_int == 0:
+            print("Its time...")
+            flag_start = 1
+
+
+        l_ws = [msg["E"],msg["o"], msg["h"] , msg["l"], msg["c"], msg["b"], msg["a"]]
+        df_data.loc[len(df_data)] = l_ws
+
+        #print(f"Took me {(time.time()-t0):.2f} seconds to get here...")
+
+        # once enough data in DF, copy, delete and analyze
+        if len(df_data) == r_int:
+            df_d_copy = df_data.copy() # reset immediately to allow WS to continue writing in background
+            df_data = df_data.iloc[0:0]
+
+            udf_df_con(df_d_copy)
+            df_d_csv = pd.concat([df_d_csv,df_d_copy])
+
+            df_rs = df_d_copy.resample(f"{r_int}S", closed="left").mean()
+            #print(df_d_copy)
+            #print(df_d10)
+
+            df_d10 = pd.concat([df_d10, df_rs])
+            df_d_copy = df_d_copy.iloc[0:0]
+            df_rs = df_rs.iloc[0:0]
+
+    # ++++++++++++++++++++++ WS ++++++++++++++++++++++
+    # adding objects to global dictionary
+    dWebsockets[f"bws_{vSymbol}_{vMethod}"] = tsm(api_key=apiKey, api_secret=apiKey_secret)
+    dWebsockets[f"bws_{vSymbol}_{vMethod}"].start()
+    
+    print(f"Starting....{dt.datetime.now()}")
+    t0 = time.time()
+
+    dWebsockets[f"bws_{vSymbol}_{vMethod}"].start_symbol_ticker_socket(callback=bin_ws, symbol=vSymbol)
+    print(f"WS Start Time: {(time.time()-t0)}")
+
+    time.sleep(r_int)
 
     # wait until sufficient data for rolling analysis 
     while len(df_d10) < iLookBack:
@@ -327,13 +307,29 @@ def udf_tradeMASTER(vSymbol, vMethod):
         
         time.sleep(1)
 
-    return dfa
+
+        dfMaster_loop = {
+            "webSocketObject": dWebsockets
+            , "dataFrames": {
+                "analysis": dfa
+                , "book": df_book
+                , "raw": df_data
+            }
+        }
+
+    return dfMaster_loop
 
 
 
-for m in ["so"]:
-    df_analysis = udf_tradeMASTER(symbol, vMethod=m)
+for s in lSymbols:
+    for m in lMethods:
+        dMaster[f"{s}_{m}"] = udf_tradeMASTER(vSymbol=s, vMethod=m)
 
+
+print(dMaster)
+
+
+for m in lMethods:
     udf_df_con(df_data)
     print("\n ++++++++++++++++++++++++ DONE ++++++++++++++++++++++++")
 
