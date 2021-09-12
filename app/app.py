@@ -298,7 +298,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
     dMaster[vSymbol][vMethod]['dataframes']['dfa'] = dfa
     dMaster[vSymbol][vMethod]['dataframes']["df_book"] = dWallet["book"]
 
-# //TODO change Websockets to higher level
+
 dWebSockets = {}
 for s in lSymbols:
     dMaster[s] = {}
@@ -326,10 +326,6 @@ for s in lSymbols:
         dMaster[s][m] = {}
         dMaster[s][m]["dataframes"] = {}
         udf_tradeMASTER(vSymbol=s, vMethod=m)
-
-
-with open("dMaster.json","w") as f:
-    f.write(dMaster)
 
 
 for s in lSymbols:
