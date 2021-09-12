@@ -18,6 +18,7 @@ import threading as th
 import sys
 import secrets
 from tabulate import tabulate as tb
+import multiprocessing as mp
 
 # ++++++++++++++++++++++ SETUP ++++++++++++++++++++++
 tz_local = pytz.timezone("Europe/Zurich")
@@ -36,7 +37,7 @@ iLookBack = 20      # max period lookback
 dMaster = {}
 lSymbols = ["BTCUSDT"]
 lMethods = ["so"]
-tRun_min = 30
+tRun_min = 1
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
 
@@ -303,6 +304,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
 
 dWebSockets = {}
+mprocesses = []
 for s in lSymbols:
     dMaster[s] = {}
     dMaster[s]["dataframes"] = {}
@@ -329,8 +331,13 @@ for s in lSymbols:
     for m in lMethods:
         dMaster[s][m] = {}
         dMaster[s][m]["dataframes"] = {}
-        udf_tradeMASTER(vSymbol=s, vMethod=m)
+        mproc = mp.Process(target=udf_tradeMASTER, args=[s,m])
+        mproc.start()
+        mprocesses.append(mproc)
+        #udf_tradeMASTER(vSymbol=s, vMethod=m)
 
+for p in mprocesses:
+    p.join()
 
 for s in lSymbols:
     for m in lMethods:
