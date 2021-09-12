@@ -17,6 +17,7 @@ from finta import TA as ta
 import threading as th
 import sys
 import secrets
+from tabulate import tabulate as tb
 
 # ++++++++++++++++++++++ SETUP ++++++++++++++++++++++
 tz_local = pytz.timezone("Europe/Zurich")
@@ -49,17 +50,34 @@ def udf_df_con(df, dtCol="timestamp"):
     cols = df.select_dtypes(exclude=["datetime64"]).columns
     df[cols] = df[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
 
+
+def udf_printDict(d, header=""):
+
+    # iterate over dict and convert any instance of DF to json, otherwise ERROR
+    dh = {}
+    df=[]
+    for k,v in d.items():
+        if isinstance(v, pd.DataFrame):
+            df.append(v)
+            continue
+        else:
+            dh[k] = v
+    print(f"\n ++++++++++++++++++ {header} ++++++++++++++++++")
+    print(json.dumps(dh, indent=2))
+    for x in df:
+        print(tb(x, headers="keys", tablefmt="psql"))
+
+
+
+
 def udf_trade(ttype, price, wallet):
     
-    
-
     if ttype == 1:
         if wallet["funds"] == 0:
             print("ERROR: Not sufficient funds")
             return 0
         
         if wallet["openTrade"] == 0 and ttype == 1:
-            print(" *************** BUY ***************")
             wallet["trade_id"] = str(secrets.token_hex(5))
 
             while wallet["trade_id"] in wallet["book"].index:
@@ -73,7 +91,6 @@ def udf_trade(ttype, price, wallet):
         # assumes investment of full funds
         wallet["book"].loc[str(wallet["trade_id"]), ["tradeType", "buyPrice","qty", "buyTime", "status"]] = ["long",price, (wallet['funds']/price), time.time(), "bought"]
         print("Purchase Complete")
-        print(wallet["book"])
         wallet["funds"] = 0
         wallet['openTrade'] = 1
         return wallet
@@ -81,7 +98,7 @@ def udf_trade(ttype, price, wallet):
     if ttype == -1 and wallet["openTrade"] == 1:
         tradeid = wallet['trade_id']
 
-        print(f" *************** SELL: {tradeid} ***************")
+        print(f"SELL: {tradeid}")
         fProfit = wallet["book"].loc[str(tradeid)]["qty"] *  (price - wallet["book"].loc[str(tradeid)]["buyPrice"])
         fSalesDuration_s = time.time() - wallet["book"].loc[str(tradeid)]["buyTime"]
         fProfit_per_sec = fProfit / fSalesDuration_s
@@ -103,6 +120,39 @@ def udf_trade(ttype, price, wallet):
 
 
 
+def bin_ws(msg):
+
+    global dMaster
+    symbol = msg["s"]
+    lstTimeStamp = dt.datetime.fromtimestamp(msg["E"]/1000)
+    
+    # ensure that the first entry is a multiple of the interval, otherwise resampling becomes issue
+    if dMaster[symbol]["flag_start"] == 0 and lstTimeStamp.second % r_int != 0:
+        print(f"Not time yet: {lstTimeStamp} > {lstTimeStamp.second}")
+        return 0
+    elif dMaster[symbol]["flag_start"] == 0 and lstTimeStamp.second % r_int == 0:
+        print("Its time...")
+        dMaster[symbol]["flag_start"] = 1
+
+
+    l_ws = [msg["E"],msg["o"], msg["h"] , msg["l"], msg["c"], msg["b"], msg["a"]]
+    dMaster[symbol]["dataframes"]["df_data"].loc[len(dMaster[symbol]["dataframes"]["df_data"])] = l_ws
+
+    # once enough data in DF, copy, delete and analyze
+    if len(dMaster[symbol]["dataframes"]["df_data"]) == r_int:
+        df_d_copy = dMaster[symbol]["dataframes"]["df_data"].copy() # reset immediately to allow WS to continue writing in background
+        dMaster[symbol]["dataframes"]["df_data"] = dMaster[symbol]["dataframes"]["df_data"].iloc[0:0]
+
+        udf_df_con(df_d_copy)
+        dMaster[symbol]["dataframes"]["df_d_csv"] = pd.concat([dMaster[symbol]["dataframes"]["df_d_csv"],df_d_copy])
+
+        df_rs = df_d_copy.resample(f"{r_int}S", closed="left").mean()
+
+        dMaster[symbol]["dataframes"]["df_d10"] = pd.concat([dMaster[symbol]["dataframes"]["df_d10"], df_rs])
+        df_d_copy = df_d_copy.iloc[0:0]
+        df_rs = df_rs.iloc[0:0]
+
+
 def udf_tradeMASTER(vSymbol, vMethod):
     """
     Purpose: Master trading function. Split out to be accessed by different threads
@@ -113,84 +163,25 @@ def udf_tradeMASTER(vSymbol, vMethod):
     """
 
     # PARAMETERS
-    t0 = 0
-    flag_start = 0
-
-    # DATAFRAMES
-    df_d10 = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
-    df_data = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
-    df_d_csv = df_d10   # csv write df
-    df_book = pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status"])
-
+    global dMaster
+    t0 = time.time()
+    
 
     # DICTIONARIES
     dWallet = {
         "trade_id": ""
         , "openTrade": 0
         , "funds": 100
-        , "book": df_book
+        , "book": pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status"])
+
     }
 
-    dWebsockets =  {}
-
-
-
-
-    def bin_ws(msg):
-
-        nonlocal flag_start
-        nonlocal df_data
-        nonlocal df_d_csv
-        nonlocal df_d10
-
-        lstTimeStamp = dt.datetime.fromtimestamp(msg["E"]/1000)
-        
-        # ensure that the first entry is a multiple of the interval, otherwise resampling becomes issue
-        if flag_start == 0 and lstTimeStamp.second % r_int != 0:
-            print(f"Not time yet: {lstTimeStamp} > {lstTimeStamp.second}")
-            return 0
-        elif flag_start == 0 and lstTimeStamp.second % r_int == 0:
-            print("Its time...")
-            flag_start = 1
-
-
-        l_ws = [msg["E"],msg["o"], msg["h"] , msg["l"], msg["c"], msg["b"], msg["a"]]
-        df_data.loc[len(df_data)] = l_ws
-
-        #print(f"Took me {(time.time()-t0):.2f} seconds to get here...")
-
-        # once enough data in DF, copy, delete and analyze
-        if len(df_data) == r_int:
-            df_d_copy = df_data.copy() # reset immediately to allow WS to continue writing in background
-            df_data = df_data.iloc[0:0]
-
-            udf_df_con(df_d_copy)
-            df_d_csv = pd.concat([df_d_csv,df_d_copy])
-
-            df_rs = df_d_copy.resample(f"{r_int}S", closed="left").mean()
-            #print(df_d_copy)
-            #print(df_d10)
-
-            df_d10 = pd.concat([df_d10, df_rs])
-            df_d_copy = df_d_copy.iloc[0:0]
-            df_rs = df_rs.iloc[0:0]
-
-    # ++++++++++++++++++++++ WS ++++++++++++++++++++++
-    # adding objects to global dictionary
-    dWebsockets[f"bws_{vSymbol}_{vMethod}"] = tsm(api_key=apiKey, api_secret=apiKey_secret)
-    dWebsockets[f"bws_{vSymbol}_{vMethod}"].start()
-    
-    print(f"Starting....{dt.datetime.now()}")
-    t0 = time.time()
-
-    dWebsockets[f"bws_{vSymbol}_{vMethod}"].start_symbol_ticker_socket(callback=bin_ws, symbol=vSymbol)
-    print(f"WS Start Time: {(time.time()-t0)}")
-
-    time.sleep(r_int)
+  
 
     # wait until sufficient data for rolling analysis 
-    while len(df_d10) < iLookBack:
-        print(f"Min. Data Collection: {len(df_d10)} entries {(len(df_d10)/(iLookBack)):.0%} in {(time.time() - t0):.2f} seconds", end="\r")
+    while len(dMaster[vSymbol]["dataframes"]["df_d10"]) < iLookBack:
+        print(f"Min. Data Collection: {len(dMaster[vSymbol]['dataframes']['df_d10'])} entries {(len(dMaster[vSymbol]['dataframes']['df_d10'])/(iLookBack)):.0%} in {(time.time() - t0):.2f} seconds", end="\r")
+        
         time.sleep(1)
     print("\n Suffcient Data, lets START!!!")
     t_a1 = time.time()
@@ -202,11 +193,11 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
     ttrade_start = time.time()
 
-    while (time.time() - ttrade_start) < (5*60) or dWallet['openTrade'] == 1:
+    while (time.time() - ttrade_start) < (1*60) or dWallet['openTrade'] == 1:
 
         t_a2 = time.time()
         
-        dfa = df_d10[["close"]].copy()  # analysis DF
+        dfa = dMaster[vSymbol]['dataframes']['df_d10'][["close"]].copy()  # analysis DF
         dfa["tsv_so_k100"] = 0
 
         # ++++> EMA
@@ -227,8 +218,6 @@ def udf_tradeMASTER(vSymbol, vMethod):
         ]
 
         ema_comp_choices =[1,-1]
-        
-        
 
         # ++++> stochastic Oscilator
         so_wd_k = 14
@@ -291,9 +280,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
             print("\nBUY signal found")
 
             dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet)
-
-            print(f"[[ buy complete: {dWallet}]]")
-            time.sleep(5)
+            udf_printDict(dWallet, header="BUY")
 
         elif dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 1:
             print(".", end="")
@@ -301,44 +288,67 @@ def udf_tradeMASTER(vSymbol, vMethod):
         elif  dfa[f"{vMethod}_switch"].tail(1).item() == -1 and dWallet["openTrade"] == 1:
             print("\nSELL signal found!")
             dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet)
-            print(f"[[ SELL complete: {dWallet}]]")
-            print("+"*100)
-
-        
+            udf_printDict(dWallet, header="SELL")
+            
+            print("\n")
+            print("*"*150)
+            print("*"*150)
         time.sleep(1)
 
+    dMaster[vSymbol][vMethod]['dataframes']['dfa'] = dfa
+    dMaster[vSymbol][vMethod]['dataframes']["df_book"] = dWallet["book"]
 
-        dfMaster_loop = {
-            "webSocketObject": dWebsockets
-            , "dataFrames": {
-                "analysis": dfa
-                , "book": df_book
-                , "raw": df_data
-            }
-        }
+# //TODO change Websockets to higher level
+dWebSockets = {}
+for s in lSymbols:
+    dMaster[s] = {}
+    dMaster[s]["dataframes"] = {}
+    dMaster[s]["flag_start"] = 0
+    dMaster[s]["dataframes"]["df_d10"] = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
+    dMaster[s]["dataframes"]["df_data"] = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
+    dMaster[s]["dataframes"]["df_d_csv"] = dMaster[s]["dataframes"]["df_d10"]   # csv write df
+    
 
-    return dfMaster_loop
+    # bin_ws
+    # ++++++++++++++++++++++ WS ++++++++++++++++++++++
+    # adding objects to global dictionary
+    dMaster[s]["websocket"] = tsm(api_key=apiKey, api_secret=apiKey_secret)
+    dMaster[s]["websocket"].start()
+    
+    print(f"Starting....{dt.datetime.now()}")
+    t0 = time.time()
 
+    dMaster[s]["websocket"].start_symbol_ticker_socket(callback=bin_ws, symbol=s)
+    print(f"WS Start Time: {(time.time()-t0)}")
+
+    time.sleep(r_int)
+    for m in lMethods:
+        dMaster[s][m] = {}
+        dMaster[s][m]["dataframes"] = {}
+        udf_tradeMASTER(vSymbol=s, vMethod=m)
+
+
+with open("dMaster.json","w") as f:
+    f.write(dMaster)
 
 
 for s in lSymbols:
     for m in lMethods:
-        dMaster[f"{s}_{m}"] = udf_tradeMASTER(vSymbol=s, vMethod=m)
+        
+        df_d10_cp = dMaster[s]["dataframes"]["df_d10"].copy()
+        df_analysis_cp = dMaster[s][m]["dataframes"]["dfa"].copy()
+        df_book_cp = dMaster[s][m]["dataframes"]["df_book"].copy()
 
+        
+        print("\n ++++++++++++++++++++++++ DONE ++++++++++++++++++++++++")
 
-print(dMaster)
+        #cols = df_d10_cp.select_dtypes(exclude=["datetime64"]).columns
+        #df_d10_cp[cols] = df_d10_cp[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
 
-
-for m in lMethods:
-    udf_df_con(df_data)
-    print("\n ++++++++++++++++++++++++ DONE ++++++++++++++++++++++++")
-
-    cols = df_d10.select_dtypes(exclude=["datetime64"]).columns
-    df_d10[cols] = df_d10[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
-
-    df_d10.to_csv(f"./df_interval_{m}.csv", index=True)
-    df_book.to_csv(f"./df_books_{m}.csv", index=True)
-    df_analysis.to_csv(f"./df_analysis_{m}.csv", index=True)    
+        df_d10_cp.to_csv(f"./df_interval_{m}.csv", index=True)
+        df_book_cp.to_csv(f"./df_books_{m}.csv", index=True)
+        df_analysis_cp.to_csv(f"./df_analysis_{m}.csv", index=True)
+     
 
 # ++++++++++++++++++++++ WS CLEAN UP ++++++++++++++++++++++
 bsm.stop()
