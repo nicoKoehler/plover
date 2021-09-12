@@ -36,6 +36,7 @@ iLookBack = 20      # max period lookback
 dMaster = {}
 lSymbols = ["BTCUSDT"]
 lMethods = ["so"]
+tRun_min = 5
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
 
@@ -71,25 +72,26 @@ def udf_printDict(d, header=""):
 
 
 def udf_trade(ttype, price, wallet):
-    
+    dTradeTime = dt.datetime.strftime(pd.to_datetime(time.time(), unit="s").tz_localize("UTC").tz_convert("CET"), "%Y-%m-%d %H:%M:%S")
     if ttype == 1:
         if wallet["funds"] == 0:
             print("ERROR: Not sufficient funds")
             return 0
         
         if wallet["openTrade"] == 0 and ttype == 1:
-            wallet["trade_id"] = str(secrets.token_hex(5))
+            wallet["trade_id"] = str(secrets.token_hex(4))
 
             while wallet["trade_id"] in wallet["book"].index:
-                wallet["trade_id"] = str(secrets.token_hex(5))
+                wallet["trade_id"] = str(secrets.token_hex(4))
 
         else: 
             return print("invalid trade combination")
 
         print(f"Trade ID found, starting Trade: {str(wallet['trade_id'])}")
 
+        
         # assumes investment of full funds
-        wallet["book"].loc[str(wallet["trade_id"]), ["tradeType", "buyPrice","qty", "buyTime", "status"]] = ["long",price, (wallet['funds']/price), time.time(), "bought"]
+        wallet["book"].loc[str(wallet["trade_id"]), ["tradeType", "buyPrice","qty", "buyTime", "status", "buyTime_dt"]] = ["long",price, (wallet['funds']/price), time.time(), "bought", dTradeTime]
         print("Purchase Complete")
         wallet["funds"] = 0
         wallet['openTrade'] = 1
@@ -102,7 +104,7 @@ def udf_trade(ttype, price, wallet):
         fProfit = wallet["book"].loc[str(tradeid)]["qty"] *  (price - wallet["book"].loc[str(tradeid)]["buyPrice"])
         fSalesDuration_s = time.time() - wallet["book"].loc[str(tradeid)]["buyTime"]
         fProfit_per_sec = fProfit / fSalesDuration_s
-        wallet["book"].loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_per_second","status"]] = [price, time.time(), fProfit, fProfit_per_sec, "closed"]
+        wallet["book"].loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_per_second","status", "sellTime_dt"]] = [price, time.time(), fProfit, fProfit_per_sec, "closed", dTradeTime]
 
 
         print("Sell Completed")
@@ -172,7 +174,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
         "trade_id": ""
         , "openTrade": 0
         , "funds": 100
-        , "book": pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status"])
+        , "book": pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status", "buyTime_dt", "sellTime_dt"])
 
     }
 
@@ -193,7 +195,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
     ttrade_start = time.time()
 
-    while (time.time() - ttrade_start) < (1*60) or dWallet['openTrade'] == 1:
+    while (time.time() - ttrade_start) < (tRun_min*60) or dWallet['openTrade'] == 1:
 
         t_a2 = time.time()
         
@@ -341,14 +343,15 @@ for s in lSymbols:
         #cols = df_d10_cp.select_dtypes(exclude=["datetime64"]).columns
         #df_d10_cp[cols] = df_d10_cp[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
 
-        df_d10_cp.to_csv(f"./df_interval_{m}.csv", index=True)
-        df_book_cp.to_csv(f"./df_books_{m}.csv", index=True)
-        df_analysis_cp.to_csv(f"./df_analysis_{m}.csv", index=True)
+        df_d10_cp.to_csv(f"./df_interval_{s}_{m}.csv", index=True)
+        df_book_cp.to_csv(f"./df_books_{s}_{m}.csv", index=True)
+        df_analysis_cp.to_csv(f"./df_analysis_{s}_{m}.csv", index=True)
      
+    print(f"Stopping....{s}")
+    dMaster[s]["websocket"].stop()
 
 # ++++++++++++++++++++++ WS CLEAN UP ++++++++++++++++++++++
-bsm.stop()
-print("Stopping....")
+
 time.sleep(5)
 
 print("Stopped....")
