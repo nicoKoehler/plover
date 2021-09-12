@@ -36,7 +36,7 @@ iLookBack = 20      # max period lookback
 dMaster = {}
 lSymbols = ["BTCUSDT"]
 lMethods = ["so"]
-tRun_min = 5
+tRun_min = 30
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
 
@@ -139,6 +139,7 @@ def bin_ws(msg):
 
     l_ws = [msg["E"],msg["o"], msg["h"] , msg["l"], msg["c"], msg["b"], msg["a"]]
     dMaster[symbol]["dataframes"]["df_data"].loc[len(dMaster[symbol]["dataframes"]["df_data"])] = l_ws
+    dMaster[symbol]["dataframes"]["df_data_record"].loc[len(dMaster[symbol]["dataframes"]["df_data_record"])] = l_ws
 
     # once enough data in DF, copy, delete and analyze
     if len(dMaster[symbol]["dataframes"]["df_data"]) == r_int:
@@ -308,6 +309,7 @@ for s in lSymbols:
     dMaster[s]["flag_start"] = 0
     dMaster[s]["dataframes"]["df_d10"] = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
     dMaster[s]["dataframes"]["df_data"] = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
+    dMaster[s]["dataframes"]["df_data_record"] = pd.DataFrame(columns=["timestamp","open","high","low","close","bid", "ask"])
     dMaster[s]["dataframes"]["df_d_csv"] = dMaster[s]["dataframes"]["df_d10"]   # csv write df
     
 
@@ -336,17 +338,19 @@ for s in lSymbols:
         df_d10_cp = dMaster[s]["dataframes"]["df_d10"].copy()
         df_analysis_cp = dMaster[s][m]["dataframes"]["dfa"].copy()
         df_book_cp = dMaster[s][m]["dataframes"]["df_book"].copy()
+        df_data_rec = dMaster[s]["dataframes"]["df_data_record"].copy()
 
         
         print("\n ++++++++++++++++++++++++ DONE ++++++++++++++++++++++++")
 
         #cols = df_d10_cp.select_dtypes(exclude=["datetime64"]).columns
         #df_d10_cp[cols] = df_d10_cp[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
-
+        udf_df_con(df_data_rec)
         df_d10_cp.to_csv(f"./df_interval_{s}_{m}.csv", index=True)
         df_book_cp.to_csv(f"./df_books_{s}_{m}.csv", index=True)
         df_analysis_cp.to_csv(f"./df_analysis_{s}_{m}.csv", index=True)
-     
+        df_data_rec.to_csv(f"./df_record_{s}_{m}.csv", index=True)
+
     print(f"Stopping....{s}")
     dMaster[s]["websocket"].stop()
 
