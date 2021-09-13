@@ -20,6 +20,8 @@ import secrets
 from tabulate import tabulate as tb
 import multiprocessing as mp
 
+tPerf_start = time.perf_counter()
+
 # ++++++++++++++++++++++ SETUP ++++++++++++++++++++++
 tz_local = pytz.timezone("Europe/Zurich")
 
@@ -35,8 +37,8 @@ r_int = 2   #resample intervall
 flag_lookback = 0
 iLookBack = 20      # max period lookback
 dMaster = {}
-lSymbols = ["BTCUSDT"]
-lMethods = ["so"]
+lSymbols = ["BTCUSDT", "AVAXUSDT", "ETHUSDT", "ADAUSDT"]
+lMethods = ["so","macd"]
 tRun_min = 1
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
@@ -179,8 +181,6 @@ def udf_tradeMASTER(vSymbol, vMethod):
         , "book": pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status", "buyTime_dt", "sellTime_dt"])
 
     }
-
-  
 
     # wait until sufficient data for rolling analysis 
     while len(dMaster[vSymbol]["dataframes"]["df_d10"]) < iLookBack:
@@ -331,7 +331,7 @@ for s in lSymbols:
     for m in lMethods:
         dMaster[s][m] = {}
         dMaster[s][m]["dataframes"] = {}
-        mproc = mp.Process(target=udf_tradeMASTER, args=[s,m])
+        mproc = th.Thread(target=udf_tradeMASTER, args=[s,m])
         mproc.start()
         mprocesses.append(mproc)
         #udf_tradeMASTER(vSymbol=s, vMethod=m)
@@ -372,4 +372,4 @@ print("Stopped....")
 # ++++++++++++++++++++++ FINAL DATA PROCESSING ++++++++++++++++++++++
 
 
-print("Le Fin")
+print(f"Le Fin. Grand Total Time: >> {((time.perf_counter() - tPerf_start)/60):.2f} Minutes")
