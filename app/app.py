@@ -8,7 +8,6 @@ import inspect as i
 import json
 import pandas as pd
 import datetime as dt
-
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import numpy as np
@@ -199,7 +198,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
     ttrade_start = time.time()
 
-    while (time.time() - ttrade_start) < (tRun_min*60) or dWallet['openTrade'] == 1:
+    while (time.time() - ttrade_start) < (tRun_min*60):# or dWallet['openTrade'] == 1:
 
         t_a2 = time.time()
         
@@ -285,19 +284,28 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
 
         # ++++> STOP LIMIT
+        # TODO Implement STOP LIMIT to prevent deep losses
         fStopPerc = 0.1     #threshold percentage loss >> =1 means value can fall to 99% of previous value
         #if dfa["close"].tail(1).item() <= dWallet["book"]
 
         if dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 0:
+            os.system("clear")
+            print(".......")
+            
             print("\nBUY signal found")
 
             dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet, vSymbol=vSymbol, vMethod=vMethod)
             print(tb(dMaster["df_book"], headers="keys", tablefmt="psql"))
+            print("\n")
+            print("*"*150)
+            print("*"*150)
 
         elif dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 1:
             print(".", end="")
         
         elif  dfa[f"{vMethod}_switch"].tail(1).item() == -1 and dWallet["openTrade"] == 1:
+            os.system("clear")
+            print(".......")
             print("\nSELL signal found!")
             dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet, vSymbol=vSymbol, vMethod=vMethod)
             print(tb(dMaster["df_book"], headers="keys", tablefmt="psql"))
@@ -354,13 +362,11 @@ for p in mprocesses:
 for s in lSymbols:
     for m in lMethods:
         
+
         df_d10_cp = dMaster[s]["dataframes"]["df_d10"].copy()
         df_analysis_cp = dMaster[s][m]["dataframes"]["dfa"].copy()
         
         df_data_rec = dMaster[s]["dataframes"]["df_data_record"].copy()
-
-        
-        print("\n ++++++++++++++++++++++++ DONE ++++++++++++++++++++++++")
 
         #cols = df_d10_cp.select_dtypes(exclude=["datetime64"]).columns
         #df_d10_cp[cols] = df_d10_cp[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
@@ -380,10 +386,30 @@ df_book_cp.to_csv(f"./df_books.csv", index=True)
 time.sleep(5)
 
 print("Stopped....")
+print("\n")
+print("_"*150)
+print("*"*150)
+print("*"*150)
+print("-"*150)
+print("\n")
+print("+"*70+" RESULTS "+"+"*70)
+print("\n")
+print(tb(dMaster["df_book"], headers="keys", tablefmt="psql"))
+print("\n \n")
+print("Profit By Currency")
+print("-"*20)
 
-
+print(tb(pd.DataFrame(dMaster["df_book"].groupby(["symbol"])["profit"].sum()), headers="keys", tablefmt="psql"))
+print("\n\n")
+print("Profit By Method")
+print("-"*20)
+print(tb(pd.DataFrame(dMaster["df_book"].groupby(["ind"])["profit"].sum()), headers="keys", tablefmt="psql"))
+print("\n\n")
+print("Profit By Currency and Method")
+print("-"*20)
+print(tb(pd.DataFrame(dMaster["df_book"].groupby(["symbol","ind"])["profit"].sum()), headers="keys", tablefmt="psql"))
 
 # ++++++++++++++++++++++ FINAL DATA PROCESSING ++++++++++++++++++++++
 
 
-print(f"Le Fin. Grand Total Time: >> {((time.perf_counter() - tPerf_start)/60):.2f} Minutes")
+print(f"\n\n ...Le Fin. Grand Total Time: >> {((time.perf_counter() - tPerf_start)/60):.2f} Minutes")
