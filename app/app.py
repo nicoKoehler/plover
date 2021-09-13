@@ -74,7 +74,7 @@ def udf_printDict(d, header=""):
 
 
 
-def udf_trade(ttype, price, wallet):
+def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---"):
     dTradeTime = dt.datetime.strftime(pd.to_datetime(time.time(), unit="s").tz_localize("UTC").tz_convert("CET"), "%Y-%m-%d %H:%M:%S")
     if ttype == 1:
         if wallet["funds"] == 0:
@@ -94,7 +94,7 @@ def udf_trade(ttype, price, wallet):
 
         
         # assumes investment of full funds
-        wallet["book"].loc[str(wallet["trade_id"]), ["tradeType", "buyPrice","qty", "buyTime", "status", "buyTime_dt"]] = ["long",price, (wallet['funds']/price), time.time(), "bought", dTradeTime]
+        wallet["book"].loc[str(wallet["trade_id"]), ["tradeScope","tradeType", "buyPrice","qty", "buyTime", "status", "buyTime_dt"]] = [f"{vSymbol}>{vMethod}","long",price, (wallet['funds']/price), time.time(), "bought", dTradeTime]
         print("Purchase Complete")
         wallet["funds"] = 0
         wallet['openTrade'] = 1
@@ -178,7 +178,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
         "trade_id": ""
         , "openTrade": 0
         , "funds": 100
-        , "book": pd.DataFrame(columns= ["tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status", "buyTime_dt", "sellTime_dt"])
+        , "book": pd.DataFrame(columns= ["tradeScope","tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status", "buyTime_dt", "sellTime_dt"])
 
     }
 
@@ -283,7 +283,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
         if dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 0:
             print("\nBUY signal found")
 
-            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet)
+            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet, vSymbol=vSymbol, vMethod=vMethod)
             udf_printDict(dWallet, header="BUY")
 
         elif dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 1:
@@ -291,7 +291,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
         
         elif  dfa[f"{vMethod}_switch"].tail(1).item() == -1 and dWallet["openTrade"] == 1:
             print("\nSELL signal found!")
-            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet)
+            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet, vSymbol=vSymbol, vMethod=vMethod)
             udf_printDict(dWallet, header="SELL")
             
             print("\n")
