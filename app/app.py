@@ -32,13 +32,32 @@ client = Client(apiKey, apiKey_secret)
 
 cr_prices = {"error":False}
 
-r_int = 10   #resample intervall
+
 flag_lookback = 0
 iLookBack = 20      # max period lookback
 dMaster = {}
-lSymbols = ["BTCUSDT", "AVAXUSDT", "ETHUSDT", "ADAUSDT"]
-lMethods = ["so","macd", "ema"]
-tRun_min = 5
+lSymbols = [
+    "BTCUSDT"
+    , "ETHUSDT"
+    , "ADAUSDT"
+    #, "AVAXUSDT"
+    ]
+lMethods = [
+    #"so",
+    "macd"
+    #, "ema"
+    ]
+
+tRun_min = 10
+
+#resample intervall
+if sys.argv:
+    r_int = int(sys.argv[1])
+else:
+    r_int = 2
+
+print(f"Starting for RESAMPLE INTERVAL >>> {r_int}...")
+
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
 
