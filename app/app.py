@@ -27,19 +27,18 @@ tz_local = pytz.timezone("Europe/Zurich")
 
 apiKey = "LuGhVqrq1cT27Dj9Lod24DxnvyJUy9FL11MfMZFulk2AUBjCIYAuz5xGBHs14YW2"
 apiKey_secret = "viQI5xPonsALtTUYlBLFm66jMyIFjAZSXPPQcyMOHAKhpgMOnlcuoIRn0xbTM0Z5"
-symbol = "BTCUSDT"
 
 client = Client(apiKey, apiKey_secret)
 
 cr_prices = {"error":False}
 
-r_int = 2   #resample intervall
+r_int = 10   #resample intervall
 flag_lookback = 0
 iLookBack = 20      # max period lookback
 dMaster = {}
 lSymbols = ["BTCUSDT", "AVAXUSDT", "ETHUSDT", "ADAUSDT"]
-lMethods = ["so","macd"]
-tRun_min = 1
+lMethods = ["so","macd", "ema"]
+tRun_min = 10
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
 
@@ -74,7 +73,7 @@ def udf_printDict(d, header=""):
 
 
 
-def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---"):
+def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---", vSellOption=""):
     global dMaster
     dTradeTime = dt.datetime.strftime(pd.to_datetime(time.time(), unit="s").tz_localize("UTC").tz_convert("CET"), "%y%m%d-%H%M%S")
     
@@ -110,7 +109,7 @@ def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---"):
         fProfit = dMaster['df_book'].loc[str(tradeid)]["qty"] *  (price - dMaster['df_book'].loc[str(tradeid)]["buyPrice"])
         fSalesDuration_s = time.time() - dMaster['df_book'].loc[str(tradeid)]["buyTime"]
         fProfit_per_sec = fProfit / fSalesDuration_s
-        dMaster['df_book'].loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_ps","status", "sell_dt"]] = [price, time.time(), fProfit, round(fProfit_per_sec,4), "closed", dTradeTime]
+        dMaster['df_book'].loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_ps","status", "sell_dt"]] = [price, time.time(), fProfit, round(fProfit_per_sec,4), f"closed{vSellOption}", dTradeTime]
 
 
         print("Sell Completed")
@@ -144,6 +143,7 @@ def bin_ws(msg):
 
 
     l_ws = [msg["E"],msg["o"], msg["h"] , msg["l"], msg["c"], msg["b"], msg["a"]]
+    dMaster[symbol]["lastPrice"] = float(msg["c"])
     dMaster[symbol]["dataframes"]["df_data"].loc[len(dMaster[symbol]["dataframes"]["df_data"])] = l_ws
     dMaster[symbol]["dataframes"]["df_data_record"].loc[len(dMaster[symbol]["dataframes"]["df_data_record"])] = l_ws
 
@@ -198,7 +198,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
 
     ttrade_start = time.time()
 
-    while (time.time() - ttrade_start) < (tRun_min*60):# or dWallet['openTrade'] == 1:
+    while (time.time() - ttrade_start) < (tRun_min*60) or dWallet['openTrade'] == 1:
 
         t_a2 = time.time()
         
@@ -286,7 +286,23 @@ def udf_tradeMASTER(vSymbol, vMethod):
         # ++++> STOP LIMIT
         # TODO Implement STOP LIMIT to prevent deep losses
         fStopPerc = 0.1     #threshold percentage loss >> =1 means value can fall to 99% of previous value
-        #if dfa["close"].tail(1).item() <= dWallet["book"]
+        if dWallet["trade_id"] != "":
+            fLastPrice = dMaster["df_book"].loc[dWallet["trade_id"]]["buyPrice"]
+        else:
+            fLastPrice = 0
+
+        if dfa["close"].tail(1).item() <= (fLastPrice)*(1-(fStopPerc/100)) and dWallet["openTrade"] == 1:
+            os.system("clear")
+            print(".......")
+            print(f"\n PRICE BELOW STOP THRESHOLD. Buy:{fLastPrice}, Now: {dfa['close'].tail(1).item()}")
+            dWallet = udf_trade(-1, dMaster[vSymbol]["lastPrice"], dWallet, vSymbol=vSymbol, vMethod=vMethod, vSellOption="-F")
+            print(tb(dMaster["df_book"], headers="keys", tablefmt="psql"))
+            
+            print("\n")
+            print("*"*150)
+            print("*"*150)
+
+            time.sleep(5)
 
         if dfa[f"{vMethod}_switch"].tail(1).item() == 1 and dWallet["openTrade"] == 0:
             os.system("clear")
@@ -294,7 +310,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
             
             print("\nBUY signal found")
 
-            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet, vSymbol=vSymbol, vMethod=vMethod)
+            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dMaster[vSymbol]["lastPrice"], dWallet, vSymbol=vSymbol, vMethod=vMethod)
             print(tb(dMaster["df_book"], headers="keys", tablefmt="psql"))
             print("\n")
             print("*"*150)
@@ -307,7 +323,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
             os.system("clear")
             print(".......")
             print("\nSELL signal found!")
-            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dfa["close"].tail(1).item(), dWallet, vSymbol=vSymbol, vMethod=vMethod)
+            dWallet = udf_trade(dfa[f"{vMethod}_switch"].tail(1).item(), dMaster[vSymbol]["lastPrice"], dWallet, vSymbol=vSymbol, vMethod=vMethod)
             print(tb(dMaster["df_book"], headers="keys", tablefmt="psql"))
             
             print("\n")
