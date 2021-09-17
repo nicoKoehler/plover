@@ -37,10 +37,15 @@ flag_lookback = 0
 iLookBack = 20      # max period lookback
 dMaster = {}
 lSymbols = [
-    "BTCUSDT"
-    , "ETHUSDT"
-    , "ADAUSDT"
-    , "AVAXUSDT"
+    "BTCUSDT",
+    "ETHUSDT",
+    "LTCEUR",
+    "XPREUR",
+    "DOGEEUR",
+    "ETHBTC",
+    "LTCBTC",
+    "XPRBTC",
+    "DOGEBTC"
     ]
 lMethods = [
     #"so",
