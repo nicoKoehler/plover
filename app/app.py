@@ -40,7 +40,7 @@ lSymbols = [
     "BTCUSDT"
     , "ETHUSDT"
     , "ADAUSDT"
-    #, "AVAXUSDT"
+    , "AVAXUSDT"
     ]
 lMethods = [
     #"so",
@@ -48,7 +48,7 @@ lMethods = [
     #, "ema"
     ]
 
-tRun_min = 10
+tRun_min = 5
 
 #resample intervall
 if sys.argv:
@@ -97,7 +97,7 @@ def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---", vSellOption=""
     dTradeTime = dt.datetime.strftime(pd.to_datetime(time.time(), unit="s").tz_localize("UTC").tz_convert("CET"), "%y%m%d-%H%M%S")
     
     if ttype == 1:
-        if wallet["funds"] == 0:
+        if dMaster[vSymbol]["funds"]== 0:
             print("ERROR: Not sufficient funds")
             return 0
         
@@ -114,10 +114,11 @@ def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---", vSellOption=""
 
         
         # assumes investment of full funds
-        dMaster['df_book'].loc[str(wallet["trade_id"]), ["symbol","ind","trade", "buyPrice","qty", "buyTime", "status", "buy_dt"]] = [vSymbol,vMethod,"long",price, (wallet['funds']/price), time.time(), "bought", dTradeTime]
+        print(f"----------> Funds: {dMaster[vSymbol]['funds']}, price: {price}")
+        dMaster['df_book'].loc[str(wallet["trade_id"]), ["symbol","ind","trade", "buyPrice","qty", "buyTime", "status", "buy_dt"]] = [vSymbol,vMethod,"long",price, (dMaster[vSymbol]["funds"]/price), time.time(), "bought", dTradeTime]
         print("Purchase Complete")
         #print(f"===========> New Book: \n  {dMaster['df_book']}")
-        wallet["funds"] = 0
+        dMaster[vSymbol]["funds"] = 0
         wallet['openTrade'] = 1
         return wallet
 
@@ -139,9 +140,9 @@ def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---", vSellOption=""
         print("---------------------------------------\n")
 
         wallet["openTrade"] = 0
-        wallet["funds"] = min(100, (dMaster['df_book'].loc[str(tradeid)]["qty"] * dMaster['df_book'].loc[str(tradeid)]["sellPrice"]))
+        dMaster[vSymbol]["funds"] = min((gFunds/len(lSymbols)), (dMaster['df_book'].loc[str(tradeid)]["qty"] * dMaster['df_book'].loc[str(tradeid)]["sellPrice"]))
         wallet["trade_id"] = ""
-        print(f"New Funds: {wallet['funds']}\n")
+        print(f"New Funds for [{vSymbol}]: {dMaster[vSymbol]['funds']}\n")
         return wallet
 
 
@@ -199,7 +200,7 @@ def udf_tradeMASTER(vSymbol, vMethod):
     dWallet = {
         "trade_id": ""
         , "openTrade": 0
-        , "funds": 100
+        #, "funds": 100
         #, "book": pd.DataFrame(columns= ["tradeScope","tradeType","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_per_second", "status", "buyTime_dt", "sellTime_dt"])
 
     }
@@ -366,8 +367,11 @@ dWebSockets = {}
 mprocesses = []
 dMaster["df_book"] = pd.DataFrame(columns= ["symbol","ind","trade","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_ps", "status", "buy_dt", "sell_dt"])
 
+gFunds = 200
+
 for s in lSymbols:
     dMaster[s] = {}
+    dMaster[s]["funds"] = gFunds / len(lSymbols)
     dMaster[s]["dataframes"] = {}
     dMaster[s]["flag_start"] = 0
     dMaster[s]["dataframes"]["df_d10"] = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
