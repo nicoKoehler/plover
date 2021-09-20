@@ -39,13 +39,10 @@ dMaster = {}
 lSymbols = [
     "BTCUSDT",
     "ETHUSDT",
+    "BTCEUR",
+    "ETHEUR",
     "LTCEUR",
-    "XPREUR",
-    "DOGEEUR",
-    "ETHBTC",
-    "LTCBTC",
-    "XPRBTC",
-    "DOGEBTC"
+    "DOGEEUR"
     ]
 lMethods = [
     #"so",
@@ -53,7 +50,10 @@ lMethods = [
     #, "ema"
     ]
 
-tRun_min = 5
+if sys.argv:
+    tRun_min = int(sys.argv[2])
+else:
+    tRun_min = 2
 
 #resample intervall
 if sys.argv:
@@ -61,7 +61,7 @@ if sys.argv:
 else:
     r_int = 2
 
-print(f"Starting for RESAMPLE INTERVAL >>> {r_int}...")
+print(f"Starting for RESAMPLE INTERVAL >>> {r_int}...for {tRun_min} Minutes")
 
 
 # ++++++++++++++++++++++ HELPER FUNCTION ++++++++++++++++++++++
@@ -365,6 +365,12 @@ def udf_tradeMASTER(vSymbol, vMethod):
                 print("*"*150)
         time.sleep(1)
 
+
+    # print(f"hanging out here for: {vSymbol}")
+    # for thread in th.enumerate(): 
+    #     print(thread.name)
+    # print("--"*50)
+
     dMaster[vSymbol][vMethod]['dataframes']['dfa'] = dfa
 
 
@@ -372,7 +378,7 @@ dWebSockets = {}
 mprocesses = []
 dMaster["df_book"] = pd.DataFrame(columns= ["symbol","ind","trade","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_ps", "status", "buy_dt", "sell_dt"])
 
-gFunds = 200
+gFunds = 300
 
 for s in lSymbols:
     dMaster[s] = {}
@@ -403,6 +409,7 @@ for s in lSymbols:
         dMaster[s][m] = {}
         dMaster[s][m]["dataframes"] = {}
         mproc = th.Thread(target=udf_tradeMASTER, args=[s,m])
+        mproc.name = f"THREADFOR_{s}_{m}"
         mproc.start()
         mprocesses.append(mproc)
         #udf_tradeMASTER(vSymbol=s, vMethod=m)
@@ -411,7 +418,7 @@ for p in mprocesses:
     p.join()
 
 # ++++++++++++++++++++++ Waiting for Threads to finish ++++++++++++++++++++++
-
+print("waiting for jobs to finish....")
 for s in lSymbols:
     for m in lMethods:
         
