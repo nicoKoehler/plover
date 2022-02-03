@@ -2,5 +2,5 @@
 data_archive/
 archive.py
 app/results/
-test_app
-.ipynb*
+test_app/
+.ipynb_checkpoints
