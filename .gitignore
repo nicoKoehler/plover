@@ -1,3 +1,4 @@
 app/results/
 test_app/
 .ipynb_checkpoints/
+*.csv
