@@ -1,0 +1,6 @@
+*.csv
+data_archive/
+archive.py
+app/results/
+test_app/
+.ipynb*

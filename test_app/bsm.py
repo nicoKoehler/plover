@@ -2,8 +2,8 @@ import threading as th
 from binance.streams import ThreadedWebsocketManager as tsm
 import time
 
-apiKey = "API KEY"
-apiKey_secret = "API KEY"
+apiKey = "LuGhVqrq1cT27Dj9Lod24DxnvyJUy9FL11MfMZFulk2AUBjCIYAuz5xGBHs14YW2"
+apiKey_secret = "viQI5xPonsALtTUYlBLFm66jMyIFjAZSXPPQcyMOHAKhpgMOnlcuoIRn0xbTM0Z5"
 vSymbol = ["BTCUSDT","ETHUSDT"]
 
 def bin_ws(msg):

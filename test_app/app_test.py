@@ -25,10 +25,10 @@ tPerf_start = time.perf_counter()
 # ++++++++++++++++++++++ SETUP ++++++++++++++++++++++
 tz_local = pytz.timezone("Europe/Zurich")
 
-apiKey = "API KEY"
-apiKey_secret = "API KEY"
+apiKey = "LuGhVqrq1cT27Dj9Lod24DxnvyJUy9FL11MfMZFulk2AUBjCIYAuz5xGBHs14YW2"
+apiKey_secret = "viQI5xPonsALtTUYlBLFm66jMyIFjAZSXPPQcyMOHAKhpgMOnlcuoIRn0xbTM0Z5"
 
-client = Client(apiKey, apiKey_secret)
+bin_client = Client(apiKey, apiKey_secret)
 
 cr_prices = {"error":False}
 
@@ -39,10 +39,13 @@ dMaster = {}
 lSymbols = [
     "BTCUSDT",
     "ETHUSDT",
+    "LTCEUR",
+    "DOGEEUR",
     "BTCEUR",
     "ETHEUR",
-    "LTCEUR",
-    "DOGEEUR"
+    "ETHBTC",
+    "LTCBTC",
+    "DOGEBTC"
     ]
 lMethods = [
     #"so",
@@ -50,10 +53,12 @@ lMethods = [
     #, "ema"
     ]
 
+
 if sys.argv:
     tRun_min = int(sys.argv[2])
 else:
     tRun_min = 2
+
 
 #resample intervall
 if sys.argv:
@@ -132,6 +137,11 @@ def udf_trade(ttype, price, wallet, vSymbol="---", vMethod="---", vSellOption=""
 
         print(f"SELL: {tradeid}")
         fProfit = dMaster['df_book'].loc[str(tradeid)]["qty"] *  (price - dMaster['df_book'].loc[str(tradeid)]["buyPrice"])
+        if vSymbol[-3:] == "BTC":
+            btc_now = bin_client.get_symbol_ticker(symbol="BTCEUR")
+            fProfit = fProfit * float(btc_now["price"]) 
+        
+        
         fSalesDuration_s = time.time() - dMaster['df_book'].loc[str(tradeid)]["buyTime"]
         fProfit_per_sec = fProfit / fSalesDuration_s
         dMaster['df_book'].loc[str(tradeid), ["sellPrice", "sellTime", "profit", "profit_ps","status", "sell_dt"]] = [price, time.time(), fProfit, round(fProfit_per_sec,4), f"closed-{str(ttype)}{vSellOption}", dTradeTime]
@@ -365,12 +375,6 @@ def udf_tradeMASTER(vSymbol, vMethod):
                 print("*"*150)
         time.sleep(1)
 
-
-    # print(f"hanging out here for: {vSymbol}")
-    # for thread in th.enumerate(): 
-    #     print(thread.name)
-    # print("--"*50)
-
     dMaster[vSymbol][vMethod]['dataframes']['dfa'] = dfa
 
 
@@ -378,11 +382,14 @@ dWebSockets = {}
 mprocesses = []
 dMaster["df_book"] = pd.DataFrame(columns= ["symbol","ind","trade","buyPrice","qty","buyTime","sellPrice", "sellTime", "profit", "profit_ps", "status", "buy_dt", "sell_dt"])
 
-gFunds = 300
+
+gFunds_btc = 0.00062
+gFunds = 25
 
 for s in lSymbols:
     dMaster[s] = {}
-    dMaster[s]["funds"] = gFunds / len(lSymbols)
+    dMaster[s]["funds"] = gFunds_btc if s[-3:] == "BTC" else gFunds
+    print(f"{s} >> Funds: {dMaster[s]['funds']}")
     dMaster[s]["dataframes"] = {}
     dMaster[s]["flag_start"] = 0
     dMaster[s]["dataframes"]["df_d10"] = pd.DataFrame(columns=["open","high","low","close","bid", "ask"], index=pd.to_datetime([]))
@@ -409,7 +416,6 @@ for s in lSymbols:
         dMaster[s][m] = {}
         dMaster[s][m]["dataframes"] = {}
         mproc = th.Thread(target=udf_tradeMASTER, args=[s,m])
-        mproc.name = f"THREADFOR_{s}_{m}"
         mproc.start()
         mprocesses.append(mproc)
         #udf_tradeMASTER(vSymbol=s, vMethod=m)
@@ -418,7 +424,7 @@ for p in mprocesses:
     p.join()
 
 # ++++++++++++++++++++++ Waiting for Threads to finish ++++++++++++++++++++++
-print("waiting for jobs to finish....")
+
 for s in lSymbols:
     for m in lMethods:
         
@@ -431,10 +437,10 @@ for s in lSymbols:
         #cols = df_d10_cp.select_dtypes(exclude=["datetime64"]).columns
         #df_d10_cp[cols] = df_d10_cp[cols].apply(pd.to_numeric, downcast="float",errors="coerce")
         udf_df_con(df_data_rec)
-        df_d10_cp.to_csv(f"./results/df_interval_{s}_{m}.csv", index=True)
+        df_d10_cp.to_csv(f"./df_interval_{s}_{m}.csv", index=True)
         
-        df_analysis_cp.to_csv(f"./results/df_analysis_{s}_{m}.csv", index=True)
-        df_data_rec.to_csv(f"./results/df_record_{s}_{m}.csv", index=True)
+        df_analysis_cp.to_csv(f"./df_analysis_{s}_{m}.csv", index=True)
+        df_data_rec.to_csv(f"./df_record_{s}_{m}.csv", index=True)
 
     print(f"Stopping....{s}")
     dMaster[s]["websocket"].stop()
