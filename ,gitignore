@@ -2,5 +2,5 @@
 data_archive/
 archive.py
 app/results/
-test_app/
+test_app
 .ipynb*
